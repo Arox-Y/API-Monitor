@@ -1,0 +1,43 @@
+# Docker Compose — API Monitor
+#
+# Currently defines the database only. The `backend` and `frontend` services are
+# added when those images exist (PLAN.md tasks 87-89); declaring them now would
+# make `docker compose up` fail on a missing Dockerfile.
+#
+# Host port defaults to 5433, NOT 5432, because a native PostgreSQL 16 service
+# already occupies 5432 on this machine. Inside the compose network the backend
+# will reach the database as `db:5432` regardless.
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: apimonitor-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-apimonitor}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devpassword}
+      POSTGRES_DB: ${POSTGRES_DB:-apimonitor}
+      # Deterministic initdb settings so the database behaves identically on
+      # every machine regardless of host locale.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8"
+    ports:
+      - "${DB_PORT:-5433}:5432"
+    volumes:
+      - apimonitor_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # `depends_on: condition: service_healthy` needs a real readiness probe.
+      # A container that has *started* is not a database that *accepts
+      # connections* — without this the backend races the database on cold start.
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-apimonitor} -d ${POSTGRES_DB:-apimonitor}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  apimonitor_pgdata:
+    name: apimonitor_pgdata
