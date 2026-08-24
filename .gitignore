@@ -32,3 +32,7 @@ Thumbs.db
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# Local planning and working documents — kept out of the public repository
+/CLAUDE.md
+/docs/
