@@ -92,3 +92,15 @@ export type DashboardStats = {
   recent_incidents: Incident[];
   recent_checks: CheckWithMonitor[];
 };
+
+/**
+ * Everything the monitor detail screen needs, from one request.
+ * Returned by GET /api/v1/monitors/{id}/checks.
+ */
+export type MonitorDetail = {
+  monitor: Monitor;
+  checks: Check[];
+  incidents: Incident[];
+  /** null when the monitor has no checks in the window. Not the same as 0. */
+  uptime_percentage_24h: number | null;
+};
