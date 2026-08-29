@@ -24,12 +24,13 @@ import (
 // Grouping them in a struct beats a long parameter list: adding one later does
 // not force every call site to change.
 type Dependencies struct {
-	Config   config.Config
-	DB       *gorm.DB
-	Tokens   *auth.TokenService
-	Auth     *handler.AuthHandler
-	Projects *handler.ProjectHandler
-	Monitors *handler.MonitorHandler
+	Config    config.Config
+	DB        *gorm.DB
+	Tokens    *auth.TokenService
+	Auth      *handler.AuthHandler
+	Projects  *handler.ProjectHandler
+	Monitors  *handler.MonitorHandler
+	Dashboard *handler.DashboardHandler
 }
 
 // New builds the Gin engine with all routes and middleware attached.
@@ -89,6 +90,12 @@ func New(deps Dependencies) *gin.Engine {
 		authed.GET("/monitors/:id", deps.Monitors.Get)
 		authed.PATCH("/monitors/:id", deps.Monitors.Update)
 		authed.DELETE("/monitors/:id", deps.Monitors.Delete)
+
+		// Monitor history: the monitor plus its checks, incidents and uptime.
+		authed.GET("/monitors/:id/checks", deps.Dashboard.MonitorDetail)
+
+		// One aggregate endpoint for the whole dashboard screen (ADR-005).
+		authed.GET("/dashboard/stats", deps.Dashboard.Stats)
 	}
 
 	return engine
