@@ -163,3 +163,54 @@ func (r *MonitorRepository) Delete(ctx context.Context, id, userID uuid.UUID) er
 
 	return nil
 }
+
+// FindDue returns the monitors that are ready to be checked.
+//
+// A monitor is due when it is enabled AND either has never been checked, or
+// enough time has passed since the last check for its own interval.
+//
+// The database is the source of truth for scheduling state, not memory. That
+// is what makes a restart safe: the process can die mid-tick and the next one
+// picks up exactly where it left off, because "when was this last checked" is
+// a column, not a variable.
+//
+// ORDER BY last_checked_at NULLS FIRST means brand-new monitors get checked
+// immediately, and the most overdue are served before the least overdue.
+//
+// The LIMIT bounds the damage after downtime: if the worker was off for an
+// hour, a thousand monitors are due at once. Without a limit we would try to
+// check all of them in one tick.
+func (r *MonitorRepository) FindDue(ctx context.Context, limit int) ([]models.Monitor, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+
+	var monitors []models.Monitor
+
+	// Written as raw SQL because the interval arithmetic is clearer this way
+	// than through the query builder. The ? placeholder still parameterises
+	// the value, so this is not string concatenation and not injectable.
+	err := r.db.WithContext(ctx).
+		Where(`enabled = true
+		       AND (last_checked_at IS NULL
+		            OR last_checked_at + (interval_seconds * INTERVAL '1 second') <= now())`).
+		Order("last_checked_at ASC NULLS FIRST").
+		Limit(limit).
+		Find(&monitors).Error
+	if err != nil {
+		return nil, fmt.Errorf("finding due monitors: %w", err)
+	}
+
+	return monitors, nil
+}
+
+// HONEST NOTE ON THIS QUERY.
+//
+// `last_checked_at + interval` is an expression, so PostgreSQL cannot use an
+// index for the comparison itself. idx_monitors_due (enabled, last_checked_at)
+// still narrows the scan to enabled monitors in staleness order, which is
+// plenty at this scale.
+//
+// At large scale the answer is a stored next_check_at column with its own
+// index, updated on every write. Documented in DATABASE_DESIGN.md section 6
+// rather than built now, because it is not yet a real problem.

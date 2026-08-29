@@ -34,6 +34,7 @@ import (
 	"github.com/ariyam/api-monitor/internal/repository"
 	"github.com/ariyam/api-monitor/internal/router"
 	"github.com/ariyam/api-monitor/internal/service"
+	"github.com/ariyam/api-monitor/internal/worker"
 )
 
 func main() {
@@ -74,12 +75,16 @@ func main() {
 	userRepo := repository.NewUserRepository(db)
 	projectRepo := repository.NewProjectRepository(db)
 	monitorRepo := repository.NewMonitorRepository(db)
+	checkRepo := repository.NewCheckRepository(db)
+	incidentRepo := repository.NewIncidentRepository(db)
+	statsRepo := repository.NewStatsRepository(db)
 
 	authService := service.NewAuthService(userRepo, tokens)
 	projectService := service.NewProjectService(projectRepo)
 	// MonitorService needs the project repository too, so it can confirm a
 	// user owns the project before letting them add a monitor to it.
 	monitorService := service.NewMonitorService(monitorRepo, projectRepo)
+	dashboardService := service.NewDashboardService(statsRepo, incidentRepo, checkRepo, monitorRepo)
 
 	// The session cookie should live exactly as long as the token inside it.
 	cookieTTLSeconds := int(auth.DefaultTokenTTL.Seconds())
@@ -91,14 +96,16 @@ func main() {
 	authHandler := handler.NewAuthHandler(authService, cookieTTLSeconds, secureCookie)
 	projectHandler := handler.NewProjectHandler(projectService)
 	monitorHandler := handler.NewMonitorHandler(monitorService)
+	dashboardHandler := handler.NewDashboardHandler(dashboardService)
 
 	engine := router.New(router.Dependencies{
-		Config:   cfg,
-		DB:       db,
-		Tokens:   tokens,
-		Auth:     authHandler,
-		Projects: projectHandler,
-		Monitors: monitorHandler,
+		Config:    cfg,
+		DB:        db,
+		Tokens:    tokens,
+		Auth:      authHandler,
+		Projects:  projectHandler,
+		Monitors:  monitorHandler,
+		Dashboard: dashboardHandler,
 	})
 
 	if !cfg.IsDevelopment() {
@@ -118,12 +125,37 @@ func main() {
 	}
 
 	// ---- Graceful shutdown ------------------------------------------------
+	//
+	// One context governs BOTH the HTTP server and the background worker, so a
+	// single Ctrl+C stops everything in an orderly way.
 	shutdownCtx, stop := signal.NotifyContext(
 		context.Background(),
 		os.Interrupt,    // Ctrl+C
 		syscall.SIGTERM, // what Docker sends
 	)
 	defer stop()
+
+	// ---- Background monitoring worker -------------------------------------
+	//
+	// Runs in the SAME process as the API (ADR-001 and ADR-006). It is a
+	// package, not a service: no message queue, no second deployment.
+	//
+	// ⚠️ This is correct with exactly ONE backend instance. Two would both find
+	// the same due monitors and check everything twice. The fix is
+	// SELECT ... FOR UPDATE SKIP LOCKED, documented in SYSTEM_DESIGN.md §8 and
+	// deliberately not built, because one instance is right for this scope.
+	scheduler := worker.NewScheduler(monitorRepo, checkRepo, worker.SchedulerConfig{
+		Tick:        time.Duration(cfg.WorkerTickSeconds) * time.Second,
+		Concurrency: cfg.WorkerConcurrency,
+	})
+
+	// workerDone lets us wait for in-flight checks during shutdown, rather
+	// than killing a check halfway through writing its transaction.
+	workerDone := make(chan struct{})
+	go func() {
+		defer close(workerDone)
+		scheduler.Run(shutdownCtx) // returns when the context is cancelled
+	}()
 
 	go func() {
 		log.Printf("listening on http://localhost:%s", cfg.Port)
@@ -141,6 +173,15 @@ func main() {
 
 	if err := server.Shutdown(timeoutCtx); err != nil {
 		log.Printf("forced shutdown: %v", err)
+	}
+
+	// Wait for the worker to finish whatever it was checking. Without this the
+	// process could exit mid-transaction.
+	select {
+	case <-workerDone:
+		log.Println("worker stopped")
+	case <-time.After(15 * time.Second):
+		log.Println("worker did not stop in time; exiting anyway")
 	}
 
 	log.Println("stopped cleanly")
