@@ -36,3 +36,6 @@ Thumbs.db
 # Local planning and working documents — kept out of the public repository
 /CLAUDE.md
 /docs/
+
+# Personal practice code - visible in the editor, never published
+/learning/
