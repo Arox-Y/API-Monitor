@@ -85,6 +85,7 @@ func main() {
 	// user owns the project before letting them add a monitor to it.
 	monitorService := service.NewMonitorService(monitorRepo, projectRepo)
 	dashboardService := service.NewDashboardService(statsRepo, incidentRepo, checkRepo, monitorRepo)
+	statusService := service.NewStatusService(projectRepo, monitorRepo, incidentRepo, statsRepo)
 
 	// The session cookie should live exactly as long as the token inside it.
 	cookieTTLSeconds := int(auth.DefaultTokenTTL.Seconds())
@@ -97,6 +98,7 @@ func main() {
 	projectHandler := handler.NewProjectHandler(projectService)
 	monitorHandler := handler.NewMonitorHandler(monitorService)
 	dashboardHandler := handler.NewDashboardHandler(dashboardService)
+	statusHandler := handler.NewStatusHandler(statusService)
 
 	engine := router.New(router.Dependencies{
 		Config:    cfg,
@@ -106,6 +108,7 @@ func main() {
 		Projects:  projectHandler,
 		Monitors:  monitorHandler,
 		Dashboard: dashboardHandler,
+		Status:    statusHandler,
 	})
 
 	if !cfg.IsDevelopment() {

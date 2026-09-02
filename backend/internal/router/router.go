@@ -31,6 +31,7 @@ type Dependencies struct {
 	Projects  *handler.ProjectHandler
 	Monitors  *handler.MonitorHandler
 	Dashboard *handler.DashboardHandler
+	Status    *handler.StatusHandler
 }
 
 // New builds the Gin engine with all routes and middleware attached.
@@ -59,6 +60,11 @@ func New(deps Dependencies) *gin.Engine {
 	// Public auth routes: you cannot be signed in to sign in.
 	v1.POST("/auth/register", deps.Auth.Register)
 	v1.POST("/auth/login", deps.Auth.Login)
+
+	// The public status page. The ONLY data endpoint reachable without a
+	// session, which is why it is listed here on its own rather than buried
+	// among the protected routes.
+	v1.GET("/public/status/:slug", deps.Status.Get)
 
 	// Everything below requires a valid session cookie.
 	//

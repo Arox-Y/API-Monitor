@@ -1,14 +1,17 @@
 "use client";
 
-import { FolderKanban, Globe, Lock } from "lucide-react";
+import Link from "next/link";
+import { ExternalLink, FolderKanban, Globe, Lock } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import {
   CreateProjectDialog,
   DeleteProjectDialog,
 } from "@/components/app/project-dialogs";
 import { EmptyState, ErrorState, TableSkeleton } from "@/components/app/states";
-import { useProjects } from "@/hooks/use-projects";
+import { useProjects, useUpdateProject } from "@/hooks/use-projects";
+import type { Project } from "@/types/api";
 
 /**
  * The projects list, reading live data.
@@ -79,18 +82,58 @@ export function ProjectsContent() {
             )}
 
             <p className="mt-1 font-mono text-xs text-muted-foreground">
-              /status/{project.slug} ·{" "}
               <span className="tabular-nums">{project.monitor_count}</span>{" "}
               {project.monitor_count === 1 ? "monitor" : "monitors"}
             </p>
+
+            {/* The status page link only appears when the project is public,
+                because a private one would 404 and look broken. */}
+            {project.is_public && (
+              <Link
+                href={`/status/${project.slug}`}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-1 inline-flex items-center gap-1 font-mono text-xs text-muted-foreground hover:text-foreground hover:underline"
+              >
+                /status/{project.slug}
+                <ExternalLink className="size-3" aria-hidden="true" />
+              </Link>
+            )}
           </div>
 
-          <div className="flex shrink-0 items-center gap-1">
+          <div className="flex shrink-0 items-center gap-3">
+            <PublicToggle project={project} />
             <DeleteProjectDialog project={project} />
           </div>
         </li>
       ))}
     </ul>
+  );
+}
+
+/**
+ * Publish or unpublish a project's status page.
+ *
+ * This is a PATCH with one field, not a dedicated endpoint. `is_public` is a
+ * field, and PATCH is the verb for changing fields.
+ */
+function PublicToggle({ project }: { project: Project }) {
+  const update = useUpdateProject(project.id);
+
+  return (
+    <div className="flex items-center gap-2">
+      <Switch
+        checked={project.is_public}
+        disabled={update.isPending}
+        // Without an accessible name a screen reader announces only "switch",
+        // with no clue which project it belongs to.
+        aria-label={`${project.is_public ? "Unpublish" : "Publish"} the status page for ${project.name}`}
+        onCheckedChange={(checked) => update.mutate({ is_public: checked })}
+      />
+      <span className="hidden text-xs text-muted-foreground sm:inline">
+        Public
+      </span>
+    </div>
   );
 }
 
