@@ -40,12 +40,18 @@ export function ProjectsContent() {
   }
 
   if (projects.length === 0) {
+    // No action button here. The page header already carries a "New project"
+    // button that stays in the same place whether the list is empty or not -
+    // duplicating it here would put two identical actions on screen at once.
+    //
+    // Found by the E2E test: it hit "strict mode violation: getByRole button
+    // New project resolved to 2 elements" the first time this page rendered
+    // with an empty list, which is exactly what a new account sees.
     return (
       <EmptyState
         icon={FolderKanban}
         title="No projects yet"
-        description="A project groups your monitors together. Create one to get started."
-        action={<CreateProjectDialog />}
+        description="A project groups your monitors together. Use New project above to create one."
       />
     );
   }

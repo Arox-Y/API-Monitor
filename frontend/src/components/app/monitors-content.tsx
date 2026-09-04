@@ -37,12 +37,13 @@ export function MonitorsContent() {
   }
 
   if (monitors.length === 0) {
+    // Same reasoning as the projects page: the header's "New monitor" button
+    // is already on screen, so the empty state does not repeat it.
     return (
       <EmptyState
         icon={Radio}
         title="No monitors yet"
-        description="A monitor checks one URL on a schedule and records whether it responded, how fast, and when it failed."
-        action={<CreateMonitorDialog />}
+        description="A monitor checks one URL on a schedule and records whether it responded, how fast, and when it failed. Use New monitor above to create one."
       />
     );
   }
