@@ -59,6 +59,30 @@ func (h *DashboardHandler) MonitorDetail(c *gin.Context) {
 	c.JSON(http.StatusOK, detail)
 }
 
+// Incidents handles GET /api/v1/incidents.
+//
+// The dashboard already receives the five most recent incidents inside
+// /dashboard/stats, which is what that screen needs. This endpoint exists for
+// the case that aggregate cannot serve: browsing further back than five.
+func (h *DashboardHandler) Incidents(c *gin.Context) {
+	userID, ok := requireUser(c)
+	if !ok {
+		return
+	}
+
+	incidents, err := h.dashboard.ListIncidents(
+		c.Request.Context(), userID, parseLimit(c, 20, 100),
+	)
+	if err != nil {
+		respondWithDomainError(c, err)
+		return
+	}
+
+	// Wrapped in an object rather than returned as a bare array, so pagination
+	// can be added later without breaking every client.
+	c.JSON(http.StatusOK, gin.H{"incidents": incidents})
+}
+
 // parseLimit reads a ?limit= query parameter and CLAMPS it.
 //
 // Never let a client decide how much work the server does. A request for

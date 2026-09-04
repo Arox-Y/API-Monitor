@@ -108,6 +108,22 @@ func (s *DashboardService) GetStats(ctx context.Context, userID uuid.UUID) (*Das
 	}, nil
 }
 
+// ListIncidents returns recent incidents across all of a user's monitors.
+func (s *DashboardService) ListIncidents(
+	ctx context.Context, userID uuid.UUID, limit int,
+) ([]models.Incident, error) {
+	incidents, err := s.incidents.ListRecentForUser(ctx, userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	// An empty slice, not nil. nil marshals to JSON null, and then every
+	// client has to guard its .map() against null for no reason.
+	if incidents == nil {
+		incidents = []models.Incident{}
+	}
+	return incidents, nil
+}
+
 // MonitorDetail is one monitor plus its recent history.
 type MonitorDetail struct {
 	Monitor   models.Monitor    `json:"monitor"`

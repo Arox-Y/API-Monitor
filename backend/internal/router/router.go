@@ -100,6 +100,9 @@ func New(deps Dependencies) *gin.Engine {
 		// Monitor history: the monitor plus its checks, incidents and uptime.
 		authed.GET("/monitors/:id/checks", deps.Dashboard.MonitorDetail)
 
+		// Incident history across every monitor the user owns.
+		authed.GET("/incidents", deps.Dashboard.Incidents)
+
 		// One aggregate endpoint for the whole dashboard screen (ADR-005).
 		authed.GET("/dashboard/stats", deps.Dashboard.Stats)
 	}
