@@ -30,6 +30,27 @@ type Checker struct {
 	client *http.Client
 }
 
+// checkerOptions configures NewChecker. Kept private: callers use the
+// With... functions below rather than constructing this directly.
+type checkerOptions struct {
+	ssrfProtection bool
+}
+
+// CheckerOption configures a Checker at construction time.
+type CheckerOption func(*checkerOptions)
+
+// WithSSRFProtection controls whether outbound connections are checked
+// against private, loopback and reserved IP ranges before connecting.
+// See ssrf.go for what this actually blocks and why.
+//
+// Default: enabled. The ONLY reason to ever disable it is in tests: Go's
+// httptest package starts real servers on 127.0.0.1, which is exactly the
+// kind of address this protection exists to refuse. Production code must
+// never disable it - see main.go, which calls NewChecker() with no options.
+func WithSSRFProtection(enabled bool) CheckerOption {
+	return func(o *checkerOptions) { o.ssrfProtection = enabled }
+}
+
 // NewChecker builds a Checker with a shared HTTP client.
 //
 // ONE client, created once, reused for every check. This matters more than it
@@ -40,23 +61,33 @@ type Checker struct {
 // Note there is no Timeout set on the client itself. That would be a single
 // value for every monitor, and each of ours has its own timeout setting. We
 // use a per-request context instead - see Check below.
-func NewChecker() *Checker {
+func NewChecker(opts ...CheckerOption) *Checker {
+	options := checkerOptions{ssrfProtection: true}
+	for _, opt := range opts {
+		opt(&options)
+	}
+
+	transport := &http.Transport{
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 10,
+		IdleConnTimeout:     90 * time.Second,
+	}
+
+	if options.ssrfProtection {
+		// newSafeDialer's Control callback runs on every dial, including
+		// each redirect hop through this same Transport - see ssrf.go for
+		// why that single mechanism covers both DNS rebinding and redirects.
+		transport.DialContext = newSafeDialer().DialContext
+	}
+
 	return &Checker{
 		client: &http.Client{
-			Transport: &http.Transport{
-				MaxIdleConns:        100,
-				MaxIdleConnsPerHost: 10,
-				IdleConnTimeout:     90 * time.Second,
-			},
+			Transport: transport,
 
 			// Follow redirects, but not forever. A misconfigured site can
 			// redirect in a loop, and without a limit we would follow it until
-			// something gave out.
-			//
-			// ⚠️ SSRF gap (ADR-012 level 3): a public URL is allowed to
-			// redirect to a private address like 127.0.0.1. Blocking that
-			// means re-validating the destination at every hop. Documented as
-			// a known gap, scheduled for Day 5.
+			// something gave out. Each hop is still guarded by the dialer
+			// above when SSRF protection is enabled.
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				if len(via) >= 5 {
 					return errors.New("stopped after 5 redirects")

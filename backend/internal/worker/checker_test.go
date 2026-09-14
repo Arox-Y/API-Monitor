@@ -37,7 +37,7 @@ func TestCheck_HealthyEndpoint(t *testing.T) {
 	}))
 	defer server.Close()
 
-	result := NewChecker().Check(context.Background(), monitorFor(server.URL, 200, 5))
+	result := NewChecker(WithSSRFProtection(false)).Check(context.Background(), monitorFor(server.URL, 200, 5))
 
 	if !result.Success {
 		t.Errorf("expected success, got failure: %s", result.Error)
@@ -59,7 +59,7 @@ func TestCheck_WrongStatusCode(t *testing.T) {
 	}))
 	defer server.Close()
 
-	result := NewChecker().Check(context.Background(), monitorFor(server.URL, 200, 5))
+	result := NewChecker(WithSSRFProtection(false)).Check(context.Background(), monitorFor(server.URL, 200, 5))
 
 	if result.Success {
 		t.Error("a 503 was treated as success when 200 was expected")
@@ -81,7 +81,7 @@ func TestCheck_NonDefaultExpectedStatus(t *testing.T) {
 	}))
 	defer server.Close()
 
-	result := NewChecker().Check(context.Background(), monitorFor(server.URL, 202, 5))
+	result := NewChecker(WithSSRFProtection(false)).Check(context.Background(), monitorFor(server.URL, 202, 5))
 
 	if !result.Success {
 		t.Errorf("202 should be success when 202 is expected, got: %s", result.Error)
@@ -100,7 +100,7 @@ func TestCheck_Timeout(t *testing.T) {
 	defer server.Close()
 
 	// 1-second timeout against a 2-second response.
-	result := NewChecker().Check(context.Background(), monitorFor(server.URL, 200, 1))
+	result := NewChecker(WithSSRFProtection(false)).Check(context.Background(), monitorFor(server.URL, 200, 1))
 
 	if result.Success {
 		t.Error("a timed-out check was reported as successful")
@@ -124,7 +124,7 @@ func TestCheck_ConnectionRefused(t *testing.T) {
 	deadURL := server.URL
 	server.Close()
 
-	result := NewChecker().Check(context.Background(), monitorFor(deadURL, 200, 5))
+	result := NewChecker(WithSSRFProtection(false)).Check(context.Background(), monitorFor(deadURL, 200, 5))
 
 	if result.Success {
 		t.Error("a refused connection was reported as successful")
@@ -139,7 +139,7 @@ func TestCheck_ConnectionRefused(t *testing.T) {
 
 func TestCheck_InvalidURL(t *testing.T) {
 	monitor := monitorFor("http://", 200, 5)
-	result := NewChecker().Check(context.Background(), monitor)
+	result := NewChecker(WithSSRFProtection(false)).Check(context.Background(), monitor)
 
 	if result.Success {
 		t.Error("an unusable URL was reported as successful")
@@ -160,7 +160,7 @@ func TestCheck_RespectsHTTPMethod(t *testing.T) {
 	monitor := monitorFor(server.URL, 200, 5)
 	monitor.Method = http.MethodHead
 
-	NewChecker().Check(context.Background(), monitor)
+	NewChecker(WithSSRFProtection(false)).Check(context.Background(), monitor)
 
 	if gotMethod != http.MethodHead {
 		t.Errorf("server saw method %q, want HEAD", gotMethod)
@@ -175,7 +175,7 @@ func TestCheck_SendsUserAgent(t *testing.T) {
 	}))
 	defer server.Close()
 
-	NewChecker().Check(context.Background(), monitorFor(server.URL, 200, 5))
+	NewChecker(WithSSRFProtection(false)).Check(context.Background(), monitorFor(server.URL, 200, 5))
 
 	if gotAgent == "" {
 		t.Error("no User-Agent sent; operators cannot tell who is calling them")
@@ -198,7 +198,7 @@ func TestCheck_ParentContextCancellation(t *testing.T) {
 	}()
 
 	start := time.Now()
-	result := NewChecker().Check(ctx, monitorFor(server.URL, 200, 30))
+	result := NewChecker(WithSSRFProtection(false)).Check(ctx, monitorFor(server.URL, 200, 30))
 	elapsed := time.Since(start)
 
 	if result.Success {
@@ -220,7 +220,7 @@ func TestCheck_LargeBodyIsBounded(t *testing.T) {
 	}))
 	defer server.Close()
 
-	result := NewChecker().Check(context.Background(), monitorFor(server.URL, 200, 5))
+	result := NewChecker(WithSSRFProtection(false)).Check(context.Background(), monitorFor(server.URL, 200, 5))
 
 	if !result.Success {
 		t.Errorf("expected success, got: %s", result.Error)

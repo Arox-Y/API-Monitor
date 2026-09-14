@@ -113,7 +113,7 @@ func TestScheduler_ChecksAndRecords(t *testing.T) {
 	}}
 	store := &fakeStore{}
 
-	s := NewScheduler(finder, store, SchedulerConfig{Tick: time.Hour})
+	s := NewScheduler(finder, store, SchedulerConfig{Tick: time.Hour, Checker: NewChecker(WithSSRFProtection(false))})
 	s.runOnce(context.Background())
 
 	if store.count() != 1 {
@@ -143,7 +143,7 @@ func TestScheduler_FailureOpensIncident(t *testing.T) {
 	}}
 	store := &fakeStore{}
 
-	NewScheduler(finder, store, SchedulerConfig{Tick: time.Hour}).runOnce(context.Background())
+	NewScheduler(finder, store, SchedulerConfig{Tick: time.Hour, Checker: NewChecker(WithSSRFProtection(false))}).runOnce(context.Background())
 
 	rec := store.records[0]
 	if rec.transition.NewStatus != models.StatusDown {
@@ -165,7 +165,7 @@ func TestScheduler_StillDownDoesNotOpenAnother(t *testing.T) {
 	}}
 	store := &fakeStore{}
 
-	NewScheduler(finder, store, SchedulerConfig{Tick: time.Hour}).runOnce(context.Background())
+	NewScheduler(finder, store, SchedulerConfig{Tick: time.Hour, Checker: NewChecker(WithSSRFProtection(false))}).runOnce(context.Background())
 
 	if store.records[0].transition.OpenIncident {
 		t.Error("a monitor that was already down must not open a SECOND incident")
@@ -183,7 +183,7 @@ func TestScheduler_RecoveryClosesIncident(t *testing.T) {
 	}}
 	store := &fakeStore{}
 
-	NewScheduler(finder, store, SchedulerConfig{Tick: time.Hour}).runOnce(context.Background())
+	NewScheduler(finder, store, SchedulerConfig{Tick: time.Hour, Checker: NewChecker(WithSSRFProtection(false))}).runOnce(context.Background())
 
 	rec := store.records[0]
 	if !rec.transition.CloseIncident {
@@ -210,7 +210,7 @@ func TestScheduler_RespectsConcurrencyLimit(t *testing.T) {
 
 	store := &fakeStore{}
 	s := NewScheduler(&fakeFinder{monitors: monitors}, store,
-		SchedulerConfig{Tick: time.Hour, Concurrency: 3})
+		SchedulerConfig{Tick: time.Hour, Concurrency: 3, Checker: NewChecker(WithSSRFProtection(false))})
 
 	s.runOnce(context.Background())
 
@@ -230,7 +230,7 @@ func TestScheduler_SurvivesFinderError(t *testing.T) {
 	store := &fakeStore{}
 
 	// The real assertion is that this does not panic or hang.
-	NewScheduler(finder, store, SchedulerConfig{Tick: time.Hour}).
+	NewScheduler(finder, store, SchedulerConfig{Tick: time.Hour, Checker: NewChecker(WithSSRFProtection(false))}).
 		runOnce(context.Background())
 
 	if store.count() != 0 {
@@ -251,7 +251,7 @@ func TestScheduler_SurvivesStoreError(t *testing.T) {
 	}}
 	store := &fakeStore{err: errors.New("write failed")}
 
-	NewScheduler(finder, store, SchedulerConfig{Tick: time.Hour}).
+	NewScheduler(finder, store, SchedulerConfig{Tick: time.Hour, Checker: NewChecker(WithSSRFProtection(false))}).
 		runOnce(context.Background())
 	// Reaching here without a panic is the assertion.
 }
@@ -266,7 +266,7 @@ func TestScheduler_StopsOnContextCancel(t *testing.T) {
 	finder := &fakeFinder{monitors: []models.Monitor{
 		testMonitor(server.URL, models.StatusUp),
 	}}
-	s := NewScheduler(finder, &fakeStore{}, SchedulerConfig{Tick: 50 * time.Millisecond})
+	s := NewScheduler(finder, &fakeStore{}, SchedulerConfig{Tick: 50 * time.Millisecond, Checker: NewChecker(WithSSRFProtection(false))})
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -290,7 +290,7 @@ func TestScheduler_StopsOnContextCancel(t *testing.T) {
 // An empty result set must be handled without fuss.
 func TestScheduler_NothingDue(t *testing.T) {
 	store := &fakeStore{}
-	NewScheduler(&fakeFinder{monitors: nil}, store, SchedulerConfig{Tick: time.Hour}).
+	NewScheduler(&fakeFinder{monitors: nil}, store, SchedulerConfig{Tick: time.Hour, Checker: NewChecker(WithSSRFProtection(false))}).
 		runOnce(context.Background())
 
 	if store.count() != 0 {

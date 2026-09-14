@@ -2,7 +2,7 @@ package worker
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -31,6 +31,7 @@ type Scheduler struct {
 	monitors    MonitorFinder
 	results     ResultStore
 	checker     *Checker
+	logger      *slog.Logger
 	tick        time.Duration
 	concurrency int
 	batchSize   int
@@ -48,6 +49,19 @@ type SchedulerConfig struct {
 
 	// BatchSize caps how many monitors one tick will take on.
 	BatchSize int
+
+	// Checker performs the actual HTTP checks. Optional: nil defaults to
+	// NewChecker() with SSRF protection enabled, which is what production
+	// always gets (main.go never sets this field).
+	//
+	// It exists as a field, rather than being hardcoded, so tests can inject
+	// a Checker with protection disabled - the only way scheduler tests can
+	// reach the httptest servers they run on 127.0.0.1. See scheduler_test.go.
+	Checker *Checker
+
+	// Logger receives structured log entries. Optional: nil defaults to
+	// slog.Default(), which main.go configures once for the whole program.
+	Logger *slog.Logger
 }
 
 // NewScheduler builds a Scheduler, applying sane defaults.
@@ -62,10 +76,21 @@ func NewScheduler(monitors MonitorFinder, results ResultStore, cfg SchedulerConf
 		cfg.BatchSize = 100
 	}
 
+	checker := cfg.Checker
+	if checker == nil {
+		checker = NewChecker() // SSRF protection enabled - the production default
+	}
+
+	logger := cfg.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+
 	return &Scheduler{
 		monitors:    monitors,
 		results:     results,
-		checker:     NewChecker(),
+		checker:     checker,
+		logger:      logger,
 		tick:        cfg.Tick,
 		concurrency: cfg.Concurrency,
 		batchSize:   cfg.BatchSize,
@@ -77,8 +102,11 @@ func NewScheduler(monitors MonitorFinder, results ResultStore, cfg SchedulerConf
 // It BLOCKS, so callers run it in its own goroutine. It returns only after
 // every in-flight check has finished, which is what makes shutdown clean.
 func (s *Scheduler) Run(ctx context.Context) {
-	log.Printf("worker: starting (tick=%s concurrency=%d batch=%d)",
-		s.tick, s.concurrency, s.batchSize)
+	s.logger.Info("worker starting",
+		"tick", s.tick.String(),
+		"concurrency", s.concurrency,
+		"batch_size", s.batchSize,
+	)
 
 	// A Ticker sends the current time down a channel every interval.
 	// Stopping it releases the underlying timer.
@@ -95,7 +123,7 @@ func (s *Scheduler) Run(ctx context.Context) {
 		// which is the idiomatic Go shape for a background loop.
 		select {
 		case <-ctx.Done():
-			log.Println("worker: shutdown requested, stopping")
+			s.logger.Info("worker stopping: shutdown requested")
 			return
 
 		case <-ticker.C:
@@ -111,7 +139,7 @@ func (s *Scheduler) runOnce(ctx context.Context) {
 		// A database hiccup must NOT kill the worker. Log it and try again on
 		// the next tick - a monitoring system that dies when its database
 		// blips is worse than useless.
-		log.Printf("worker: could not load due monitors: %v", err)
+		s.logger.Error("worker could not load due monitors", "error", err)
 		return
 	}
 
@@ -119,7 +147,7 @@ func (s *Scheduler) runOnce(ctx context.Context) {
 		return
 	}
 
-	log.Printf("worker: checking %d monitor(s)", len(monitors))
+	s.logger.Info("worker checking monitors", "count", len(monitors))
 
 	// A buffered channel used as a SEMAPHORE.
 	//
@@ -168,8 +196,8 @@ func (s *Scheduler) runOnce(ctx context.Context) {
 			// it. One malformed response could take the whole service down.
 			defer func() {
 				if r := recover(); r != nil {
-					log.Printf("worker: PANIC while checking monitor %s (%s): %v",
-						m.ID, m.Name, r)
+					s.logger.Error("worker panic while checking monitor",
+						"monitor_id", m.ID, "monitor_name", m.Name, "panic", r)
 				}
 			}()
 
@@ -199,16 +227,25 @@ func (s *Scheduler) checkOne(ctx context.Context, monitor models.Monitor) {
 	defer cancel()
 
 	if err := s.results.RecordResult(storeCtx, monitor.ID, result, transition); err != nil {
-		log.Printf("worker: failed to record check for %s (%s): %v",
-			monitor.ID, monitor.Name, err)
+		s.logger.Error("worker failed to record check",
+			"monitor_id", monitor.ID, "monitor_name", monitor.Name, "error", err)
 		return
 	}
 
+	// Deliberately NOT logging monitor.URL below.
+	//
+	// A monitor's URL is user-supplied and can legitimately contain a secret
+	// in its query string (an API key used as a health-check credential, for
+	// instance). Logging the full URL would put that secret into server logs
+	// forever, on every incident. The monitor's own NAME is a label the user
+	// chose specifically to be non-sensitive, so that is what identifies it
+	// here instead.
 	if transition.OpenIncident {
-		log.Printf("worker: INCIDENT OPENED for %s (%s): %s",
-			monitor.Name, monitor.URL, result.Error)
+		s.logger.Warn("incident opened",
+			"monitor_id", monitor.ID, "monitor_name", monitor.Name, "cause", result.Error)
 	}
 	if transition.CloseIncident {
-		log.Printf("worker: RECOVERED %s (%s)", monitor.Name, monitor.URL)
+		s.logger.Info("incident resolved",
+			"monitor_id", monitor.ID, "monitor_name", monitor.Name)
 	}
 }
