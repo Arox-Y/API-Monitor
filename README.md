@@ -4,9 +4,11 @@ Uptime and health monitoring for APIs and websites. Register the endpoints you c
 about, and the system checks them on a schedule, recording availability, response times,
 failures, and incidents — with an optional public status page per project.
 
-> **🚧 In development.** The database, backend service, and dashboard UI are running.
-> Authentication, the monitoring worker, and incident detection are next.
-> See [Current status](#current-status) for exactly what works today.
+> **Status: MVP complete.** Register, sign in, create projects and monitors, watch the
+> background worker check them for real, see incidents open and close automatically, and
+> publish a public status page — all working end to end, backed by 128 Go tests and 25
+> frontend tests. See [Current status](#current-status) for exactly what is verified and
+> what is not.
 
 ---
 
@@ -56,47 +58,42 @@ is a package, not a service; the boundary is clean enough to extract later if ne
 
 ### Prerequisites
 
-Docker & Docker Compose · Go 1.26+ · Node.js 20+
+Docker & Docker Compose · Go 1.26+ (for local backend development) · Node.js 20+ (for
+local frontend development)
 
-### Run it
+### Run it — one command
 
 ```bash
 git clone https://github.com/Arox-Y/API-Monitor.git
 cd API-Monitor
 cp .env.example .env      # set JWT_SECRET — there is deliberately no default
+docker compose up
 ```
 
-**1. Database**
+This builds and starts the database, the backend, and the frontend together. The backend
+applies its own schema on first start — there is no separate migration step to run by
+hand.
+
+| Service | URL |
+|---|---|
+| Frontend | <http://localhost:3000> |
+| Backend API | <http://localhost:8080> |
+| Health check | <http://localhost:8080/healthz> |
+
+> The database's host port defaults to **5433**, not 5432, to avoid clashing with a
+> locally installed PostgreSQL. Inside the Compose network the backend reaches it as
+> `db:5432` regardless.
+
+### Local development, without Docker for the app itself
+
+Useful for editing Go or TypeScript with fast rebuilds, while still using Docker for the
+database only:
 
 ```bash
-docker compose up -d db
-```
-
-Postgres is published on host port **5433**, not 5432, to avoid clashing with a locally
-installed PostgreSQL. Inside the compose network the backend reaches it as `db:5432`.
-
-**2. Apply the schema**
-
-```bash
-docker compose exec -T db psql -U apimonitor -d apimonitor \
-  < backend/migrations/000001_init_schema.up.sql
-```
-
-**3. Backend**
-
-```bash
-cd backend && go run ./cmd/api
-```
-
-Health check: <http://localhost:8080/healthz>
-
-**4. Frontend**
-
-```bash
+docker compose up -d db                # database only
+cd backend && go run ./cmd/api          # backend — applies its own schema
 cd frontend && npm install && npm run dev
 ```
-
-Open <http://localhost:3000>
 
 ---
 
@@ -104,17 +101,30 @@ Open <http://localhost:3000>
 
 ```
 ├── backend/
-│   ├── cmd/api/            entry point: config, database, server, shutdown
+│   ├── cmd/api/            entry point: config, database, migrations, server, worker
 │   ├── internal/
+│   │   ├── auth/           password hashing, JWT
 │   │   ├── config/         environment → validated struct
-│   │   └── database/       connection pool, ping, close
-│   └── migrations/         versioned schema, up and down
+│   │   ├── database/       connection pool, migration runner
+│   │   ├── handler/        HTTP layer
+│   │   ├── middleware/     auth, CORS, rate limiting, security headers
+│   │   ├── models/         data shapes
+│   │   ├── repository/     database queries, always ownership-scoped
+│   │   ├── router/         the entire route table, in one file
+│   │   ├── service/        business rules, validation, authorization
+│   │   ├── testutil/       integration-test database helpers
+│   │   └── worker/         the scheduler, the HTTP checker, the SSRF guard
+│   ├── migrations/         versioned schema, embedded into the binary
+│   └── Dockerfile          multi-stage: Go build → minimal Alpine runtime
 └── frontend/
     └── src/
-        ├── app/            routes: landing, (auth), (dashboard)
+        ├── app/            routes: landing, (auth), (dashboard), status/[slug]
         ├── components/     ui/ (shadcn) · app/ (product) · landing/ (marketing)
-        ├── lib/            formatting helpers
+        ├── hooks/          TanStack Query hooks, one per resource
+        ├── lib/            API client, Zod schemas, formatting helpers
         └── types/          API response types
+    ├── e2e/                Playwright: the critical user journey, end to end
+    └── Dockerfile          multi-stage: Next.js standalone build → minimal runtime
 ```
 
 ---
@@ -133,14 +143,25 @@ CREATE UNIQUE INDEX idx_incidents_one_open
 A partial unique index: unique only across *unresolved* rows. A monitor can accumulate
 unlimited closed incidents but never two open ones. An hour of downtime becomes one
 incident, not sixty — and the guarantee survives bugs in application code, because
-PostgreSQL enforces it rather than a service method.
+PostgreSQL enforces it rather than a service method. Proven by a test that forces a
+transaction to fail partway through and asserts nothing was left behind.
 
 **Incidents are created by transitions, not states.** Only the healthy→failing edge opens
 one; repeated failures do not.
 
+**SSRF protection lives at the network dial, not at URL validation.** The product's job is
+"fetch a URL a user gave us" — a user could point a monitor at `http://169.254.169.254/`
+(cloud metadata) or `http://localhost:5432`. A one-time check when the monitor is saved
+cannot catch DNS rebinding — the hostname resolving somewhere different by the time it is
+actually checked. A `net.Dialer.Control` callback inspects the *resolved IP*, at the
+moment of every real connection attempt, which closes that gap and covers every HTTP
+redirect through the same mechanism, for free.
+
 **Versioned SQL migrations, not `AutoMigrate`.** GORM's `AutoMigrate` cannot express the
 partial unique index above, nor `CHECK` constraints, and offers no down migration or
-reviewable diff. Schema lives in numbered `.up.sql`/`.down.sql` pairs.
+reviewable diff. Schema lives in numbered `.up.sql`/`.down.sql` pairs, embedded into the
+compiled binary with Go's `embed` package and applied automatically at startup — a fresh
+`docker compose up` needs no manual step.
 
 **`checks.status_code` is nullable.** A timeout or DNS failure produces no status code at
 all. `NULL` says that honestly; `0` would be a lie and `200` would be dangerous.
@@ -149,7 +170,9 @@ all. `NULL` says that honestly; `0` would be a lie and `200` would be dangerous.
 different failures — one guards against bad user input, the other against bad code.
 
 **404, not 403, for another user's resource.** A `403` confirms the resource exists,
-letting an attacker enumerate IDs. Ownership is scoped at the service layer, once.
+letting an attacker enumerate IDs. Ownership is scoped at the repository layer on every
+query, proven by a test suite that deliberately breaks that scoping and confirms the test
+catches it before trusting the test at all.
 
 **JWT in an httpOnly cookie, not `localStorage`.** JavaScript cannot read it, so an XSS
 cannot steal the session. The trade-off is that CSRF becomes the relevant threat,
@@ -159,25 +182,44 @@ mitigated with `SameSite=Lax`.
 it is unreachable. A health check that always returns `ok` reports healthy while the
 application is broken.
 
+**Structured logs never carry a monitor's URL.** A monitor's URL is user-supplied and can
+carry a secret in its query string (an API key used as a health-check credential).
+Incident logs identify the monitor by name and ID instead.
+
 ---
+
+## Testing
+
+```bash
+# Backend
+cd backend
+go test ./...                    # unit tests — fast, no database
+go test -tags=integration ./...  # + real-database tests (needs `docker compose up -d db`)
+
+# Frontend
+cd frontend
+npm test                         # vitest
+npx playwright test              # end-to-end, needs the full stack running
+```
 
 ## Current status
 
 | Area | State |
 |---|---|
-| Database schema (5 tables, 13 indexes) | ✅ Applied and constraint-tested |
-| Docker Compose (PostgreSQL) | ✅ Running with healthcheck |
-| Go backend skeleton + `/healthz` | ✅ Verified against a live database |
-| Marketing landing page | ✅ Complete |
-| Dashboard UI | ✅ Built — currently on sample data |
-| Authentication | ⬜ Next |
-| Projects & monitors CRUD | ⬜ Next |
-| Monitoring worker | ⬜ Planned |
-| Incidents & status page | ⬜ Planned |
-| Tests | ⬜ Planned |
-
-The dashboard renders sample data and says so on screen. Nothing is presented as working
-that isn't.
+| Authentication (register, login, logout, sessions) | ✅ 38 tests |
+| Projects & monitors CRUD, ownership-scoped | ✅ cross-user isolation proven by test |
+| Monitoring worker | ✅ verified against a real outage end to end |
+| Incidents (open/close, one per outage) | ✅ |
+| Public status page | ✅ leak-audited — no URLs, IDs, or internal errors exposed |
+| Dashboard | ✅ real aggregates, computed in SQL |
+| SSRF protection, rate limiting, security headers | ✅ |
+| Structured logging | ✅ |
+| Dark mode | ✅ |
+| Backend tests | ✅ 128 passing (`go test -race` blocked on this machine — 32-bit gcc) |
+| Frontend tests | ✅ 25 passing |
+| End-to-end test | ✅ written, passes against a live stack |
+| Docker images (backend + frontend) | 🟡 written, **not yet build-verified** |
+| Responsive layout, manually reviewed | 🟡 code applied, not yet visually confirmed |
 
 ---
 
@@ -190,7 +232,8 @@ Stated deliberately rather than discovered later:
   The fix (`SELECT … FOR UPDATE SKIP LOCKED`) is understood but not implemented
 - No alerting — incidents are recorded and visible, but nothing notifies you
 - No retention job; the `checks` table grows unbounded
-- SSRF mitigation is not yet implemented — the service fetches user-supplied URLs
+- Rate limiting is per-process, in memory — resets on restart, not shared across instances
+  (consistent with the single-instance limitation above)
 
 ---
 
