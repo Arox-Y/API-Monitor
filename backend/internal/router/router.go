@@ -32,6 +32,14 @@ type Dependencies struct {
 	Monitors  *handler.MonitorHandler
 	Dashboard *handler.DashboardHandler
 	Status    *handler.StatusHandler
+
+	// Rate limiters, one per traffic class - the numbers match
+	// API_SPEC.md section 4 exactly. Built once in main.go, so their
+	// background cleanup goroutines share the app's single shutdown
+	// context, and handed in here rather than constructed per request.
+	AuthRateLimit    *middleware.RateLimiter // 5/min  - register & login
+	DefaultRateLimit *middleware.RateLimiter // 100/min - everything else authenticated
+	PublicRateLimit  *middleware.RateLimiter // 60/min  - the public status page
 }
 
 // New builds the Gin engine with all routes and middleware attached.
@@ -45,12 +53,14 @@ func New(deps Dependencies) *gin.Engine {
 	// every other user's requests along with it.
 	engine.Use(gin.Recovery())
 	engine.Use(gin.Logger())
+	engine.Use(middleware.SecurityHeaders())
 	engine.Use(middleware.CORS(deps.Config.CORSOrigin))
 
 	// ---- Public: infrastructure -------------------------------------------
 
 	// Deliberately outside /api/v1. Health checks are not part of the product
-	// API and should not be versioned alongside it.
+	// API and should not be versioned alongside it, and are not rate limited -
+	// Docker's own healthcheck polls this constantly by design.
 	engine.GET("/healthz", healthzHandler(deps.DB))
 
 	// ---- API v1 -----------------------------------------------------------
@@ -58,22 +68,34 @@ func New(deps Dependencies) *gin.Engine {
 	v1 := engine.Group("/api/v1")
 
 	// Public auth routes: you cannot be signed in to sign in.
-	v1.POST("/auth/register", deps.Auth.Register)
-	v1.POST("/auth/login", deps.Auth.Login)
+	//
+	// The strictest limit in the app (5/min) lives here specifically because
+	// these are the endpoints a credential-stuffing attack would hammer -
+	// trying many passwords against one email, or many emails at once.
+	auth1 := v1.Group("/auth")
+	auth1.Use(deps.AuthRateLimit.Middleware())
+	{
+		auth1.POST("/register", deps.Auth.Register)
+		auth1.POST("/login", deps.Auth.Login)
+	}
 
 	// The public status page. The ONLY data endpoint reachable without a
 	// session, which is why it is listed here on its own rather than buried
-	// among the protected routes.
-	v1.GET("/public/status/:slug", deps.Status.Get)
+	// among the protected routes. Its own, more generous limit (60/min)
+	// keeps a status page that gets linked somewhere busy from being taken
+	// down by its own popularity.
+	v1.GET("/public/status/:slug", deps.PublicRateLimit.Middleware(), deps.Status.Get)
 
 	// Everything below requires a valid session cookie.
 	//
 	// Applying RequireAuth to a GROUP rather than to each route is the point:
 	// a new endpoint added inside this group is protected automatically.
 	// Listing routes individually eventually means forgetting one, and a
-	// forgotten auth check is a data breach.
+	// forgotten auth check is a data breach. The default rate limit (100/min)
+	// is applied the same way, for the same reason.
 	authed := v1.Group("")
 	authed.Use(middleware.RequireAuth(deps.Tokens, handler.SessionCookieName))
+	authed.Use(deps.DefaultRateLimit.Middleware())
 	{
 		authed.POST("/auth/logout", deps.Auth.Logout)
 		authed.GET("/auth/me", deps.Auth.Me)
