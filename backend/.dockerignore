@@ -1,0 +1,13 @@
+# Keeps the build CONTEXT small and, more importantly, keeps secrets out of
+# it entirely - .env is never sent to the Docker daemon, so it cannot end up
+# baked into an image layer by accident.
+.env
+.env.*
+!.env.example
+
+.git
+*.md
+
+# Test artifacts and local build output - never needed inside the image.
+*.test
+coverage.out

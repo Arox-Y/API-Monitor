@@ -1,0 +1,12 @@
+.env
+.env.*
+!.env.example
+
+node_modules
+.next
+.git
+*.md
+
+# Personal practice code (see learning/README.md) - never belongs in an
+# image, same as it never belongs in a git commit.
+learning

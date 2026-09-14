@@ -1,12 +1,12 @@
 # Docker Compose — API Monitor
 #
-# Currently defines the database only. The `backend` and `frontend` services are
-# added when those images exist (PLAN.md tasks 87-89); declaring them now would
-# make `docker compose up` fail on a missing Dockerfile.
+# `docker compose up` starts the whole stack: database, backend, frontend.
+# On a completely fresh volume, the backend applies its own schema on
+# startup (internal/database/migrate.go) - there is no manual step.
 #
 # Host port defaults to 5433, NOT 5432, because a native PostgreSQL 16 service
 # already occupies 5432 on this machine. Inside the compose network the backend
-# will reach the database as `db:5432` regardless.
+# reaches the database as `db:5432` regardless.
 
 services:
   db:
@@ -47,6 +47,64 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
+
+  backend:
+    build:
+      context: ./backend
+    container_name: apimonitor-backend
+    restart: unless-stopped
+    depends_on:
+      # NOT just "starts before" - condition: service_healthy means Docker
+      # actually waits for db's healthcheck to pass first. Without it, the
+      # backend would race the database on every cold start: it would try to
+      # connect within the first second, long before Postgres is accepting
+      # connections, and crash-loop until it happened to win the race.
+      db:
+        condition: service_healthy
+    environment:
+      # Host "db", port 5432: the INTERNAL compose network address, not the
+      # 5433 host mapping above. Anything outside this network (your browser,
+      # a script on the host) uses 5433; anything inside it uses this.
+      DATABASE_URL: postgres://${POSTGRES_USER:-apimonitor}:${POSTGRES_PASSWORD:-devpassword}@db:5432/${POSTGRES_DB:-apimonitor}?sslmode=disable
+      PORT: 8080
+      # Defaults to "development", NOT "production", even though this is a
+      # Docker Compose file. That is deliberate: ENV=production makes the
+      # session cookie Secure-only (HTTPS-required - see auth/jwt.go and
+      # ADR-004), and this stack has no reverse proxy or TLS termination in
+      # front of it anywhere. Defaulting to "production" here would silently
+      # break login the moment someone ran the exact command this file exists
+      # for. A REAL production deployment needs HTTPS in front of the app
+      # (a load balancer or reverse proxy) - genuinely out of scope for this
+      # MVP - and should set ENV=production only once that exists.
+      ENV: ${ENV:-development}
+      # No default on purpose - config.Load() refuses to start without a real
+      # value, and compose's ${VAR:?message} form fails the SAME way, before
+      # the container even starts, rather than crash-looping silently.
+      JWT_SECRET: "${JWT_SECRET:?JWT_SECRET must be set in .env - generate one with openssl rand -base64 48}"
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+      WORKER_TICK_SECONDS: ${WORKER_TICK_SECONDS:-10}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-20}
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+    # The Dockerfile's own HEALTHCHECK instruction is what actually runs;
+    # this section is inherited automatically and needs no repeating here.
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # NEXT_PUBLIC_API_URL must be reachable from the BROWSER, not from
+        # inside the Docker network - the browser runs on the host, outside
+        # compose entirely, so "http://backend:8080" (which only resolves
+        # inside this network) would not work here. It has to be the same
+        # host-published address a person's browser would type.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8080}
+    container_name: apimonitor-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
 
 volumes:
   apimonitor_pgdata:
