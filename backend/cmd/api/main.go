@@ -5,7 +5,7 @@
 //
 // This file is WIRING ONLY:
 //  1. load settings
-//  2. connect to the database
+//  2. connect to the database and apply pending migrations
 //  3. build each layer and hand it its dependencies
 //  4. start the server, and stop it cleanly when asked
 //
@@ -19,6 +19,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -31,6 +32,7 @@ import (
 	"github.com/ariyam/api-monitor/internal/config"
 	"github.com/ariyam/api-monitor/internal/database"
 	"github.com/ariyam/api-monitor/internal/handler"
+	"github.com/ariyam/api-monitor/internal/middleware"
 	"github.com/ariyam/api-monitor/internal/repository"
 	"github.com/ariyam/api-monitor/internal/router"
 	"github.com/ariyam/api-monitor/internal/service"
@@ -39,26 +41,80 @@ import (
 
 func main() {
 	// ---- 1. Settings ------------------------------------------------------
+	//
+	// A plain stdlib log.Fatalf here, before slog exists, is the one place
+	// in this file that is not structured logging - there is nothing to
+	// configure a logger's format FROM yet, since that decision itself lives
+	// in cfg.
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("configuration error: %v", err)
 	}
-	log.Printf("starting API Monitor (env=%s)", cfg.Env)
 
-	// ---- 2. Database ------------------------------------------------------
+	// ---- Structured logging -----------------------------------------------
+	//
+	// JSON in production (machine-parseable, the format a real log
+	// aggregator expects), plain text in development (a human reading a
+	// terminal). SYSTEM_DESIGN.md section 7 documents this choice; slog is
+	// the standard library's structured logger, so it needed no dependency.
+	//
+	// slog.SetDefault means any package that calls the package-level
+	// slog.Info/Error functions - rather than carrying its own *slog.Logger -
+	// picks up this same configuration automatically (see handler/response.go).
+	var logHandler slog.Handler
+	if cfg.IsDevelopment() {
+		logHandler = slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})
+	} else {
+		logHandler = slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})
+	}
+	logger := slog.New(logHandler)
+	slog.SetDefault(logger)
+
+	logger.Info("starting API Monitor", "env", cfg.Env)
+
+	// ---- 2. Database --------------------------------------------------------
 	db, err := database.Connect(cfg.DatabaseURL, cfg.IsDevelopment())
 	if err != nil {
-		log.Fatalf("database error: %v", err)
+		logger.Error("database connection failed", "error", err)
+		os.Exit(1)
 	}
-	log.Println("connected to database")
+	logger.Info("connected to database")
 
 	defer func() {
 		if err := database.Close(db); err != nil {
-			log.Printf("error closing database: %v", err)
+			logger.Error("error closing database", "error", err)
 		}
 	}()
 
-	// ---- 3. Wiring --------------------------------------------------------
+	// ---- 2b. Migrations ----------------------------------------------------
+	//
+	// Applied here, automatically, every time the process starts - not by a
+	// developer remembering to run psql by hand. See internal/database/
+	// migrate.go for why this is still "explicit" in ADR-003's sense: the
+	// SQL files are the single source of truth, this just runs them.
+	//
+	// This runs before anything else touches the database, so a fresh
+	// container - or a fresh contributor's first `docker compose up` - ends
+	// up with a real, versioned schema with no manual step at all.
+	if err := database.RunMigrations(cfg.DatabaseURL); err != nil {
+		logger.Error("running migrations failed", "error", err)
+		os.Exit(1)
+	}
+	logger.Info("migrations applied")
+
+	// ---- Graceful shutdown --------------------------------------------------
+	//
+	// Created early, and shared by EVERYTHING that needs to stop cleanly when
+	// asked: the HTTP server, the background worker, and the rate limiters'
+	// cleanup goroutines below. One Ctrl+C stops all of it in the same way.
+	shutdownCtx, stop := signal.NotifyContext(
+		context.Background(),
+		os.Interrupt,    // Ctrl+C
+		syscall.SIGTERM, // what Docker sends
+	)
+	defer stop()
+
+	// ---- 3. Wiring ----------------------------------------------------------
 	//
 	// Built bottom-up, because each layer needs the one below it:
 	//
@@ -69,7 +125,8 @@ func main() {
 
 	tokens, err := auth.NewTokenService(cfg.JWTSecret, auth.DefaultTokenTTL)
 	if err != nil {
-		log.Fatalf("token service error: %v", err)
+		logger.Error("token service error", "error", err)
+		os.Exit(1)
 	}
 
 	userRepo := repository.NewUserRepository(db)
@@ -100,22 +157,46 @@ func main() {
 	dashboardHandler := handler.NewDashboardHandler(dashboardService)
 	statusHandler := handler.NewStatusHandler(statusService)
 
+	// ---- Rate limiters --------------------------------------------------
+	//
+	// Numbers match API_SPEC.md section 4 exactly:
+	//   auth endpoints        5 requests / minute / IP  - the strictest,
+	//                         because these are what a credential-stuffing
+	//                         attack would hammer
+	//   authenticated routes  100 requests / minute / IP
+	//   public status page    60 requests / minute / IP
+	//
+	// Each gets a small burst allowance above its sustained rate, so one
+	// legitimate user opening a few tabs at once is not immediately punished.
+	authRateLimit := middleware.NewRateLimiter(5, 5)
+	defaultRateLimit := middleware.NewRateLimiter(100, 20)
+	publicRateLimit := middleware.NewRateLimiter(60, 10)
+
+	// Each limiter's cleanup goroutine shares the app's one shutdown
+	// context, so none of them outlive the process they belong to.
+	go authRateLimit.StartCleanup(shutdownCtx)
+	go defaultRateLimit.StartCleanup(shutdownCtx)
+	go publicRateLimit.StartCleanup(shutdownCtx)
+
 	engine := router.New(router.Dependencies{
-		Config:    cfg,
-		DB:        db,
-		Tokens:    tokens,
-		Auth:      authHandler,
-		Projects:  projectHandler,
-		Monitors:  monitorHandler,
-		Dashboard: dashboardHandler,
-		Status:    statusHandler,
+		Config:           cfg,
+		DB:               db,
+		Tokens:           tokens,
+		Auth:             authHandler,
+		Projects:         projectHandler,
+		Monitors:         monitorHandler,
+		Dashboard:        dashboardHandler,
+		Status:           statusHandler,
+		AuthRateLimit:    authRateLimit,
+		DefaultRateLimit: defaultRateLimit,
+		PublicRateLimit:  publicRateLimit,
 	})
 
 	if !cfg.IsDevelopment() {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
-	// ---- 4. Server --------------------------------------------------------
+	// ---- 4. Server ----------------------------------------------------------
 	server := &http.Server{
 		Addr:    ":" + cfg.Port,
 		Handler: engine,
@@ -126,17 +207,6 @@ func main() {
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
-
-	// ---- Graceful shutdown ------------------------------------------------
-	//
-	// One context governs BOTH the HTTP server and the background worker, so a
-	// single Ctrl+C stops everything in an orderly way.
-	shutdownCtx, stop := signal.NotifyContext(
-		context.Background(),
-		os.Interrupt,    // Ctrl+C
-		syscall.SIGTERM, // what Docker sends
-	)
-	defer stop()
 
 	// ---- Background monitoring worker -------------------------------------
 	//
@@ -150,6 +220,7 @@ func main() {
 	scheduler := worker.NewScheduler(monitorRepo, checkRepo, worker.SchedulerConfig{
 		Tick:        time.Duration(cfg.WorkerTickSeconds) * time.Second,
 		Concurrency: cfg.WorkerConcurrency,
+		Logger:      logger,
 	})
 
 	// workerDone lets us wait for in-flight checks during shutdown, rather
@@ -161,31 +232,32 @@ func main() {
 	}()
 
 	go func() {
-		log.Printf("listening on http://localhost:%s", cfg.Port)
+		logger.Info("listening", "addr", "http://localhost:"+cfg.Port)
 		if err := server.ListenAndServe(); err != nil &&
 			!errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("server failed: %v", err)
+			logger.Error("server failed", "error", err)
+			os.Exit(1)
 		}
 	}()
 
 	<-shutdownCtx.Done()
-	log.Println("shutdown signal received, finishing active requests...")
+	logger.Info("shutdown signal received, finishing active requests")
 
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	if err := server.Shutdown(timeoutCtx); err != nil {
-		log.Printf("forced shutdown: %v", err)
+		logger.Error("forced shutdown", "error", err)
 	}
 
 	// Wait for the worker to finish whatever it was checking. Without this the
 	// process could exit mid-transaction.
 	select {
 	case <-workerDone:
-		log.Println("worker stopped")
+		logger.Info("worker stopped")
 	case <-time.After(15 * time.Second):
-		log.Println("worker did not stop in time; exiting anyway")
+		logger.Warn("worker did not stop in time, exiting anyway")
 	}
 
-	log.Println("stopped cleanly")
+	logger.Info("stopped cleanly")
 }

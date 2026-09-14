@@ -6,7 +6,7 @@ package handler
 
 import (
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -81,7 +81,16 @@ func respondWithDomainError(c *gin.Context, err error) {
 		//
 		// Log the real error for us; tell the client nothing. A raw database
 		// error would reveal table names and schema details to an attacker.
-		log.Printf("unhandled error on %s %s: %v", c.Request.Method, c.Request.URL.Path, err)
+		// slog.Default() rather than a per-handler logger: main.go configures
+		// the default logger once at startup, and every package that has no
+		// reason to carry its own logger reference can just use it.
+		//
+		// Only the method, path and error are logged - never headers or the
+		// request body, which could carry a password on a failed login or a
+		// cookie value. That is also why this is the ONLY place an internal
+		// error's real text is written down anywhere: the response the
+		// client receives never contains it (see the default case below).
+		slog.Error("unhandled error", "method", c.Request.Method, "path", c.Request.URL.Path, "error", err)
 		respondError(c, http.StatusInternalServerError,
 			"INTERNAL_ERROR", "Something went wrong on our end.")
 	}
