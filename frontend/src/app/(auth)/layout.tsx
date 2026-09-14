@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Activity } from "lucide-react";
+import { Sparkle } from "lucide-react";
 
 /**
  * Shared frame for the sign-in and sign-up pages.
@@ -18,7 +18,7 @@ export default function AuthLayout({
         href="/"
         className="mb-8 flex items-center gap-2 rounded-md focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring"
       >
-        <Activity className="size-4" aria-hidden="true" />
+        <Sparkle className="size-4" aria-hidden="true" />
         <span className="text-sm font-semibold tracking-tight">API Monitor</span>
       </Link>
 

@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { Activity, CircleAlert, CircleCheck, CircleX } from "lucide-react";
+import { CircleAlert, CircleCheck, CircleX, Sparkle } from "lucide-react";
 
 /**
  * The PUBLIC status page, at /status/{slug}.
@@ -107,7 +107,7 @@ export default async function StatusPage({
     <div className="min-h-screen bg-background">
       <div className="mx-auto max-w-2xl px-4 py-12 sm:py-16">
         <header className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Activity className="size-4" aria-hidden="true" />
+          <Sparkle className="size-4" aria-hidden="true" />
           API Monitor
         </header>
 

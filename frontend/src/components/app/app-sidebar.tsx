@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Activity } from "lucide-react";
+import { Sparkle } from "lucide-react";
 
 import { SidebarNav } from "./sidebar-nav";
 
@@ -14,7 +14,7 @@ export function AppSidebar() {
     <aside className="hidden w-60 shrink-0 flex-col border-r border-border bg-sidebar lg:flex">
       {/* Brand. h-14 matches the topbar height so the two align exactly. */}
       <div className="flex h-14 items-center gap-2 border-b border-border px-4">
-        <Activity className="size-4 text-foreground" aria-hidden="true" />
+        <Sparkle className="size-4 text-foreground" aria-hidden="true" />
         <span className="text-sm font-semibold tracking-tight">API Monitor</span>
       </div>
 

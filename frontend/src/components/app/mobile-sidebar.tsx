@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Activity, Menu } from "lucide-react";
+import { Menu, Sparkle } from "lucide-react";
 
 import {
   Sheet,
@@ -38,7 +38,7 @@ export function MobileSidebar() {
 
       <SheetContent side="left" className="w-64 bg-sidebar p-0">
         <div className="flex h-14 items-center gap-2 border-b border-border px-4">
-          <Activity className="size-4" aria-hidden="true" />
+          <Sparkle className="size-4" aria-hidden="true" />
           {/* Base UI dialogs need an accessible name; this one is visible. */}
           <SheetTitle className="text-sm font-semibold tracking-tight">
             API Monitor
