@@ -51,12 +51,13 @@ type SchedulerConfig struct {
 	BatchSize int
 
 	// Checker performs the actual HTTP checks. Optional: nil defaults to
-	// NewChecker() with SSRF protection enabled, which is what production
-	// always gets (main.go never sets this field).
+	// NewChecker() with SSRF protection enabled - the safe default for
+	// anything that forgets to set this field.
 	//
-	// It exists as a field, rather than being hardcoded, so tests can inject
-	// a Checker with protection disabled - the only way scheduler tests can
-	// reach the httptest servers they run on 127.0.0.1. See scheduler_test.go.
+	// main.go sets it explicitly, turning protection off outside production
+	// (see the comment there for why). Scheduler tests set it too, the only
+	// way they can reach the httptest servers they run on 127.0.0.1. See
+	// scheduler_test.go.
 	Checker *Checker
 
 	// Logger receives structured log entries. Optional: nil defaults to

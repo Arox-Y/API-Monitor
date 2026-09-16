@@ -217,9 +217,16 @@ func main() {
 	// the same due monitors and check everything twice. The fix is
 	// SELECT ... FOR UPDATE SKIP LOCKED, documented in SYSTEM_DESIGN.md §8 and
 	// deliberately not built, because one instance is right for this scope.
+	// SSRF protection (ADR-012) is a production concern: it exists to stop a
+	// PUBLIC deployment from being tricked into probing its own internal
+	// network via a user-supplied URL. On a developer's own machine there is
+	// no untrusted user and no internal network to protect - and disabling it
+	// is what lets a monitor legitimately target a service on localhost, the
+	// same way ENV already relaxes the login cookie's Secure flag below.
 	scheduler := worker.NewScheduler(monitorRepo, checkRepo, worker.SchedulerConfig{
 		Tick:        time.Duration(cfg.WorkerTickSeconds) * time.Second,
 		Concurrency: cfg.WorkerConcurrency,
+		Checker:     worker.NewChecker(worker.WithSSRFProtection(!cfg.IsDevelopment())),
 		Logger:      logger,
 	})
 
