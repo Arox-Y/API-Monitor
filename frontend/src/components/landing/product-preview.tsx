@@ -132,7 +132,7 @@ export function ProductPreview() {
           <div className="flex items-center justify-between gap-4 border-b border-white/[0.07] px-4 py-2.5">
             <div className="flex min-w-0 items-center gap-3">
               <Sparkle className="size-4 shrink-0 text-sky-300" aria-hidden="true" />
-              <div className="flex items-center gap-1.5 truncate text-[12px] text-slate-500">
+              <div className="flex items-center gap-1.5 truncate text-[12px] text-slate-400">
                 <span>Dashboards</span>
                 <ChevronRight className="size-3" aria-hidden="true" />
                 <span className="text-slate-300">Overview</span>
@@ -142,7 +142,7 @@ export function ProductPreview() {
             <div className="hidden flex-1 justify-center sm:flex">
               <div className="flex w-full max-w-xs items-center gap-2 rounded-md border border-white/[0.07] bg-white/[0.03] px-2.5 py-1.5">
                 <Search className="size-3.5 text-slate-500" aria-hidden="true" />
-                <span className="text-[12px] text-slate-500">Search monitors…</span>
+                <span className="text-[12px] text-slate-400">Search monitors…</span>
               </div>
             </div>
 
@@ -162,13 +162,13 @@ export function ProductPreview() {
           <div className="flex">
             {/* Sidebar */}
             <aside className="hidden w-44 shrink-0 border-r border-white/[0.07] p-3 md:block">
-              <p className="px-2 pb-1.5 text-[10px] font-medium uppercase tracking-wider text-slate-600">
+              <p className="px-2 pb-1.5 text-[10px] font-medium uppercase tracking-wider text-slate-400">
                 Favorites
               </p>
               <SidebarItem icon={Star} label="Overview" />
               <SidebarItem icon={Radio} label="Incidents" />
 
-              <p className="px-2 pt-4 pb-1.5 text-[10px] font-medium uppercase tracking-wider text-slate-600">
+              <p className="px-2 pt-4 pb-1.5 text-[10px] font-medium uppercase tracking-wider text-slate-400">
                 Workspace
               </p>
               <SidebarItem icon={LayoutDashboard} label="Monitors" active />
@@ -180,7 +180,7 @@ export function ProductPreview() {
             <div className="min-w-0 flex-1 p-4">
               <div className="mb-3 flex items-center justify-between">
                 <h3 className="text-[13px] font-medium text-white">Monitor List</h3>
-                <div className="flex items-center gap-1 text-[11px] text-slate-500">
+                <div className="flex items-center gap-1 text-[11px] text-slate-400">
                   Last 24h
                   <ChevronDown className="size-3" aria-hidden="true" />
                 </div>
@@ -195,7 +195,7 @@ export function ProductPreview() {
                           <th
                             key={h}
                             scope="col"
-                            className="px-2 py-2 text-left text-[11px] font-medium text-slate-500"
+                            className="px-2 py-2 text-left text-[11px] font-medium text-slate-400"
                           >
                             {h}
                           </th>
@@ -212,7 +212,7 @@ export function ProductPreview() {
                         <td className="px-2 py-2.5 text-[12px] font-medium text-slate-200">
                           {m.name}
                         </td>
-                        <td className="px-2 py-2.5 text-[12px] text-slate-500">
+                        <td className="px-2 py-2.5 text-[12px] text-slate-400">
                           {m.project}
                         </td>
                         <td className="px-2 py-2.5">
@@ -221,7 +221,7 @@ export function ProductPreview() {
                         <td className="px-2 py-2.5 font-mono text-[11px] tabular-nums text-slate-400">
                           {m.response}
                         </td>
-                        <td className="px-2 py-2.5 font-mono text-[11px] tabular-nums text-slate-500">
+                        <td className="px-2 py-2.5 font-mono text-[11px] tabular-nums text-slate-400">
                           {m.lastCheck}
                         </td>
                       </tr>
@@ -248,7 +248,7 @@ export function ProductPreview() {
                       <p className="truncate text-[11px] leading-snug text-slate-300">
                         {item.text}
                       </p>
-                      <p className="mt-0.5 font-mono text-[10px] text-slate-600">
+                      <p className="mt-0.5 font-mono text-[10px] text-slate-400">
                         {item.time} ago
                       </p>
                     </div>

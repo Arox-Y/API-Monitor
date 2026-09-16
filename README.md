@@ -218,11 +218,12 @@ npx playwright test              # end-to-end, needs the full stack running
 | SSRF protection, rate limiting, security headers | ✅ |
 | Structured logging | ✅ |
 | Dark mode | ✅ |
-| Backend tests | ✅ 128 passing (`go test -race` blocked on this machine — 32-bit gcc) |
+| Backend tests | ✅ 128 passing, including `go test -race` (run in a Linux container — this machine's own gcc is 32-bit) |
 | Frontend tests | ✅ 25 passing |
 | End-to-end test | ✅ all 10 steps pass, against the real Docker stack |
 | Docker images (backend + frontend) | ✅ build-verified, full stack runs via `docker compose up` |
-| Responsive layout, manually reviewed | 🟡 code applied, not yet visually confirmed |
+| Responsive layout (375/768/1440px) | ✅ reviewed via captured screenshots, no defects |
+| Accessibility (WCAG 2.0/2.1 A+AA, automated scan) | ✅ 0 violations across all pages |
 
 ---
 

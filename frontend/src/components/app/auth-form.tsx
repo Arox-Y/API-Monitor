@@ -150,7 +150,7 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
         {isRegister ? "Already have an account? " : "No account? "}
         <Link
           href={isRegister ? "/login" : "/register"}
-          className="text-foreground hover:underline"
+          className="text-foreground underline underline-offset-2"
         >
           {isRegister ? "Sign in" : "Create one"}
         </Link>
