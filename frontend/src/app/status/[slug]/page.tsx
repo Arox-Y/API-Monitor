@@ -37,7 +37,19 @@ type PublicStatus = {
   active_incidents: PublicIncident[];
 };
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+// This is a SERVER component, so this fetch runs inside the Next.js
+// container itself - NOT in the visitor's browser. NEXT_PUBLIC_API_URL is
+// baked in at build time for the BROWSER's benefit (e.g. "http://localhost:8080",
+// reachable via the host port mapping); from inside the frontend container
+// that same address is the frontend container's own loopback, where nothing
+// is listening. INTERNAL_API_URL is a plain runtime env var (read fresh on
+// every request, no rebuild needed) so docker-compose.yml can point the
+// server at the backend's container-network address ("http://backend:8080")
+// while the browser keeps using the host-mapped one.
+const API_BASE =
+  process.env.INTERNAL_API_URL ??
+  process.env.NEXT_PUBLIC_API_URL ??
+  "http://localhost:8080";
 
 async function fetchStatus(slug: string): Promise<PublicStatus | null> {
   try {

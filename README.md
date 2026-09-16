@@ -6,9 +6,10 @@ failures, and incidents — with an optional public status page per project.
 
 > **Status: MVP complete.** Register, sign in, create projects and monitors, watch the
 > background worker check them for real, see incidents open and close automatically, and
-> publish a public status page — all working end to end, backed by 128 Go tests and 25
-> frontend tests. See [Current status](#current-status) for exactly what is verified and
-> what is not.
+> publish a public status page — all working end to end, backed by 128 Go tests, 25
+> frontend tests, and a Playwright end-to-end test that passes against the real Docker
+> stack. See [Current status](#current-status) for exactly what is verified and what is
+> not.
 
 ---
 
@@ -155,7 +156,9 @@ one; repeated failures do not.
 cannot catch DNS rebinding — the hostname resolving somewhere different by the time it is
 actually checked. A `net.Dialer.Control` callback inspects the *resolved IP*, at the
 moment of every real connection attempt, which closes that gap and covers every HTTP
-redirect through the same mechanism, for free.
+redirect through the same mechanism, for free. It only runs in production (`ENV=production`);
+in development it's off, the same way the login cookie's `Secure` flag is relaxed, so a
+monitor can legitimately target something on `localhost` while you're building.
 
 **Versioned SQL migrations, not `AutoMigrate`.** GORM's `AutoMigrate` cannot express the
 partial unique index above, nor `CHECK` constraints, and offers no down migration or
@@ -217,8 +220,8 @@ npx playwright test              # end-to-end, needs the full stack running
 | Dark mode | ✅ |
 | Backend tests | ✅ 128 passing (`go test -race` blocked on this machine — 32-bit gcc) |
 | Frontend tests | ✅ 25 passing |
-| End-to-end test | ✅ written, passes against a live stack |
-| Docker images (backend + frontend) | 🟡 written, **not yet build-verified** |
+| End-to-end test | ✅ all 10 steps pass, against the real Docker stack |
+| Docker images (backend + frontend) | ✅ build-verified, full stack runs via `docker compose up` |
 | Responsive layout, manually reviewed | 🟡 code applied, not yet visually confirmed |
 
 ---

@@ -26,6 +26,14 @@ let targetHealthy = true;
 let targetServer: http.Server;
 let targetPort: number;
 
+// The backend that checks this server is not always this same machine's
+// network namespace: run the stack via `docker compose up` and the worker
+// lives inside a container, where "127.0.0.1" means the container itself,
+// not this host. E2E_TARGET_HOST lets the same test address either setup -
+// "127.0.0.1" (default) for a backend run with `go run ./cmd/api`,
+// "host.docker.internal" for a backend running in Docker.
+const TARGET_HOST = process.env.E2E_TARGET_HOST ?? "127.0.0.1";
+
 test.beforeAll(async () => {
   targetServer = http.createServer((_req, res) => {
     if (targetHealthy) {
@@ -37,8 +45,12 @@ test.beforeAll(async () => {
     }
   });
 
+  // Bind to every interface unless we're in the plain-loopback case: a
+  // container reaching in via host.docker.internal cannot connect to a
+  // server bound only to the host's loopback interface.
+  const bindHost = TARGET_HOST === "127.0.0.1" ? "127.0.0.1" : "0.0.0.0";
   await new Promise<void>((resolve) => {
-    targetServer.listen(0, "127.0.0.1", resolve);
+    targetServer.listen(0, bindHost, resolve);
   });
 
   const address = targetServer.address();
@@ -62,7 +74,7 @@ test("register through public status page", async ({ page, browser }) => {
   const password = "a-strong-e2e-password";
   const projectName = `E2E Project ${unique}`;
   const monitorName = `E2E Monitor ${unique}`;
-  const targetUrl = `http://127.0.0.1:${targetPort}/health`;
+  const targetUrl = `http://${TARGET_HOST}:${targetPort}/health`;
 
   await test.step("1. register", async () => {
     await page.goto("/register");

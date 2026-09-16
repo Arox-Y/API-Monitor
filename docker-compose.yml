@@ -101,6 +101,13 @@ services:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8080}
     container_name: apimonitor-frontend
     restart: unless-stopped
+    environment:
+      # Server Components (e.g. the public status page) run their fetches
+      # INSIDE this container, not in the browser - unlike NEXT_PUBLIC_API_URL
+      # above, this needs the Docker network address. A plain (non-
+      # NEXT_PUBLIC_) env var is read fresh on every request, so unlike the
+      # build arg above, changing this never requires rebuilding the image.
+      INTERNAL_API_URL: http://backend:8080
     depends_on:
       - backend
     ports:
